@@ -15,7 +15,17 @@ export async function buildApp() {
   });
 
   await app.register(cors, {
-    origin: [config.ALLOWED_ORIGIN, 'https://nandomrtns.github.io'],
+    // API é pública e sem cookie/sessão (capability via UUID + rate limit),
+    // então liberar localhost em qualquer porta pra desenvolvimento não muda
+    // a postura de segurança real.
+    origin: (origin, cb) => {
+      const allowed =
+        !origin ||
+        origin === config.ALLOWED_ORIGIN ||
+        origin === 'https://nandomrtns.github.io' ||
+        /^http:\/\/localhost(:\d+)?$/.test(origin);
+      cb(null, allowed);
+    },
   });
 
   // Global generoso — a rota que realmente precisa de proteção (criar reserva,
