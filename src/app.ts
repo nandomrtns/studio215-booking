@@ -1,7 +1,11 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import rateLimit from '@fastify/rate-limit';
 import { config } from './config.js';
 import { healthRoutes } from './routes/health.js';
+import { availabilityRoutes } from './routes/availability.js';
+import { pricingRoutes } from './routes/pricing.js';
+import { reservationRoutes } from './routes/reservations.js';
 
 export async function buildApp() {
   const app = Fastify({
@@ -14,10 +18,21 @@ export async function buildApp() {
     origin: [config.ALLOWED_ORIGIN, 'https://nandomrtns.github.io'],
   });
 
-  await app.register(healthRoutes);
+  // Global generoso — a rota que realmente precisa de proteção (criar reserva,
+  // que trava uma data de verdade) tem um limite mais apertado no próprio
+  // registro da rota, via `config.rateLimit` no fastify-plugin.
+  await app.register(rateLimit, {
+    global: true,
+    max: 300,
+    timeWindow: '1 minute',
+  });
 
-  // Rotas de reserva, pagamento, webhook, .ics de saída e admin chegam a partir
-  // da Fase 2 — a Fase 1 só precisa provar que o serviço sobe e fala com o banco.
+  await app.register(healthRoutes);
+  await app.register(availabilityRoutes);
+  await app.register(pricingRoutes);
+  await app.register(reservationRoutes);
+
+  // Pagamento, webhook, .ics de saída e admin chegam na Fase 3/4.
 
   return app;
 }
