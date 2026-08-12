@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { computeQuote, findApplicableRule, nightsBetween } from '../services/pricing.js';
+import { getCancellationPolicy } from '../config/cancellation-policy.js';
 
 export async function pricingRoutes(app: FastifyInstance) {
   app.get('/api/pricing', async (req, reply) => {
@@ -23,6 +24,9 @@ export async function pricingRoutes(app: FastifyInstance) {
     }
 
     const nights = nightsBetween(query.checkIn, query.checkOut);
-    return reply.send(computeQuote(rule, nights));
+    return reply.send({
+      ...computeQuote(rule, nights),
+      cancellationPolicy: getCancellationPolicy(nights),
+    });
   });
 }
