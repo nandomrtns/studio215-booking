@@ -4,13 +4,12 @@ Backend de reserva direta do Studio 215 — Fastify + Drizzle + Postgres, deploy
 no Railway. Serviço separado do site (`studio215-site`, que continua estático no
 GitHub Pages sem nenhuma mudança).
 
-Contexto completo, arquitetura e o roadmap das próximas fases: peça pro Claude
-Code recapitular a conversa do projeto `studio215poa` — este README cobre só
-"como rodar", não "por quê".
-
-**Estado atual (Fase 1):** só o esqueleto — `/api/health` e o schema do banco.
-Nenhuma reserva, pagamento ou sincronização com Airbnb ainda funciona. Isso
-chega na Fase 2 em diante.
+**Estado atual: Fase 3 em andamento.** Fases 1 e 2 completas e em produção
+(motor de reservas, calendário sincronizado com o Airbnb, expiração
+automática). O código da Fase 3 (pagamento via Mercado Pago) já está pronto e
+commitado, mas ainda não testado ponta a ponta — falta credencial de teste do
+Mercado Pago. Ver [Roadmap](#roadmap) abaixo pro estado exato e os próximos
+passos.
 
 ## Rodar localmente
 
@@ -66,8 +65,68 @@ usa com o GitHub Pages.
 
 ## Variáveis de ambiente
 
-Ver `.env.example` — comentado, com o que já é usado na Fase 1 e o que só entra
-a partir da Fase 2 (Mercado Pago, token do calendário de saída, login do admin).
+Ver `.env.example` — comentado, com o que já é usado hoje e o que só entra na
+Fase 4 (token do calendário de saída, login do admin).
+
+## Roadmap
+
+### Fase 1 — Esqueleto ✅
+
+`/api/health`, schema do banco (6 tabelas), migration com as EXCLUDE
+constraints que travam overbooking no próprio Postgres.
+
+### Fase 2 — Motor de reservas ✅
+
+Disponibilidade combinada (reservas + bloqueios manuais + calendário do
+Airbnb sincronizado), cálculo de preço, criação de pré-reserva com lock
+consultivo + trava de overbooking, expiração automática de reserva pendente
+sem pagamento.
+
+### Fase 3 — Pagamento via Mercado Pago 🚧 em andamento
+
+Checkout Transparente (Pix e cartão, sem redirecionar o hóspede pro site do
+MP). Código completo no backend (`routes/payments.ts`, `routes/webhooks.ts`,
+`services/payment-confirmation.ts`) e no frontend (`site/assets/js/booking.js`
+— escolha de método, QR do Pix, Card Payment Brick) — commits `5cc83a0`
+(booking-service) e `76d3ff9` (site), já publicados no GitHub.
+
+**Decisões de negócio já tomadas e implementadas:**
+- Pagamento aprovado que chega atrasado (reserva já expirou) e a data segue
+  livre → resgata pra `confirmed` em vez de tratar como conflito.
+- Conflito real de data → estorno automático via API do MP, sem esperar ação
+  manual.
+- `?preview=1` no site continua travando o botão de reservar pro público
+  geral até o primeiro pagamento real supervisionado (ver Fase E abaixo).
+
+**O que falta, em ordem:**
+
+- [ ] **A — Credenciais de teste.** Nando cria a Aplicação no [painel de
+      desenvolvedores do MP](https://www.mercadopago.com.br/developers/panel),
+      pega `MP_ACCESS_TOKEN`/`MP_PUBLIC_KEY` de teste (prefixo `TEST-`) e
+      cadastra o webhook (`https://studio215-booking-production.up.railway.app/api/webhooks/mercadopago`,
+      evento Pagamentos) pra gerar o `MP_WEBHOOK_SECRET`.
+- [ ] **B — Testar em sandbox.** Com as 3 env vars de teste no Railway, testar
+      Pix (QR real + aprovação simulada) e cartão (cartões de teste do MP:
+      aprovado/recusado/pendente) ponta a ponta, confirmando que a reserva
+      vira `confirmed` no banco pelos dois caminhos.
+- [ ] **C — Conta pronta pra receber de verdade.** Fora do código: identidade
+      verificada e conta bancária vinculada na conta MP do Nando (Configurações
+      → Conta bancária/Saques no painel MP), pra o saque não ficar retido.
+- [ ] **D — Produção.** Gerar credenciais de produção no painel MP, registrar
+      o mesmo webhook em modo produção (assinatura secreta é diferente da de
+      teste), trocar as 3 env vars no Railway e o `MP_PUBLIC_KEY` em
+      `booking.js`, publicar o site.
+- [ ] **E — Primeiro pagamento real supervisionado.** Nando faz uma reserva de
+      verdade via `?preview=1` (Pix de valor baixo ou cartão próprio) pra
+      confirmar que o dinheiro cai na conta MP. Só depois disso remove o gate
+      `PREVIEW_MODE` e abre pro público geral.
+
+### Fase 4 — Painel admin e .ics de saída — ainda não iniciada
+
+Login único (senha, sem tabela de usuários — `ADMIN_PASSWORD_HASH`/
+`ADMIN_JWT_SECRET` já reservados em `.env.example`), visão das reservas e
+bloqueios manuais pelo Nando, e feed `.ics` (`CALENDAR_FEED_TOKEN`) pro Airbnb
+importar o calendário do booking-service, fechando o sync nos dois sentidos.
 
 ## Estrutura
 
