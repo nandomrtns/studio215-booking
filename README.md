@@ -6,10 +6,10 @@ GitHub Pages sem nenhuma mudança).
 
 **Estado atual: Fase 3 em andamento.** Fases 1 e 2 completas e em produção
 (motor de reservas, calendário sincronizado com o Airbnb, expiração
-automática). O código da Fase 3 (pagamento via Mercado Pago) já está pronto e
-commitado, mas ainda não testado ponta a ponta — falta credencial de teste do
-Mercado Pago. Ver [Roadmap](#roadmap) abaixo pro estado exato e os próximos
-passos.
+automática). Fase 3 (pagamento via Mercado Pago) testada e funcionando em
+sandbox (Pix, cartão aprovado/recusado, webhook) — falta preparar a conta do
+Nando pra receber de verdade e trocar pras credenciais de produção. Ver
+[Roadmap](#roadmap) abaixo pro estado exato e os próximos passos.
 
 ## Rodar localmente
 
@@ -87,8 +87,12 @@ sem pagamento.
 Checkout Transparente (Pix e cartão, sem redirecionar o hóspede pro site do
 MP). Código completo no backend (`routes/payments.ts`, `routes/webhooks.ts`,
 `services/payment-confirmation.ts`) e no frontend (`site/assets/js/booking.js`
-— escolha de método, QR do Pix, Card Payment Brick) — commits `5cc83a0`
-(booking-service) e `76d3ff9` (site), já publicados no GitHub.
+— escolha de método, QR do Pix, Card Payment Brick), publicado no GitHub.
+**Testado ponta a ponta em sandbox em 2026-08-13** — Pix (QR real + idempotência
+de reload), cartão aprovado (confirma a reserva na hora) e recusado (reserva
+continua `pending`, permite nova tentativa), e o webhook (assinatura HMAC
+verificada, dedupe, busca sempre o status real na API do MP) — os 3 juntos
+cobrem os caminhos que importam.
 
 **Decisões de negócio já tomadas e implementadas:**
 - Pagamento aprovado que chega atrasado (reserva já expirou) e a data segue
@@ -98,17 +102,22 @@ MP). Código completo no backend (`routes/payments.ts`, `routes/webhooks.ts`,
 - `?preview=1` no site continua travando o botão de reservar pro público
   geral até o primeiro pagamento real supervisionado (ver Fase E abaixo).
 
+**Nota pra quando migration nova entrar** (Fase 4 vai precisar): rodar
+`node dist/db/migrate.js && node dist/server.js` como Start Command
+temporário pra aplicar uma migration nova em produção **funciona pra aplicar
+a migration, mas não deve ficar como Start Command permanente** — isso
+derrubou o serviço inteiro (502) nos restarts seguintes em 2026-08-13, causa
+raiz ainda não totalmente diagnosticada. Fluxo seguro: trocar o Start Command,
+confirmar nos Deploy Logs que a migration aplicou (`✓ nome_do_arquivo.sql`),
+reverter pra `node dist/server.js` imediatamente.
+
 **O que falta, em ordem:**
 
-- [ ] **A — Credenciais de teste.** Nando cria a Aplicação no [painel de
-      desenvolvedores do MP](https://www.mercadopago.com.br/developers/panel),
-      pega `MP_ACCESS_TOKEN`/`MP_PUBLIC_KEY` de teste (prefixo `TEST-`) e
-      cadastra o webhook (`https://studio215-booking-production.up.railway.app/api/webhooks/mercadopago`,
-      evento Pagamentos) pra gerar o `MP_WEBHOOK_SECRET`.
-- [ ] **B — Testar em sandbox.** Com as 3 env vars de teste no Railway, testar
-      Pix (QR real + aprovação simulada) e cartão (cartões de teste do MP:
-      aprovado/recusado/pendente) ponta a ponta, confirmando que a reserva
-      vira `confirmed` no banco pelos dois caminhos.
+- [x] **A — Credenciais de teste.** Aplicação criada no [painel de
+      desenvolvedores do MP](https://www.mercadopago.com.br/developers/panel)
+      (Checkout Transparente / API de Pagamentos), credenciais de teste e
+      webhook configurados.
+- [x] **B — Testar em sandbox.** Feito em 2026-08-13 — ver acima.
 - [ ] **C — Conta pronta pra receber de verdade.** Fora do código: identidade
       verificada e conta bancária vinculada na conta MP do Nando (Configurações
       → Conta bancária/Saques no painel MP), pra o saque não ficar retido.
