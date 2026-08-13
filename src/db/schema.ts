@@ -101,10 +101,16 @@ export const pricingRules = pgTable('pricing_rules', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
-/** Log de idempotência dos webhooks do Mercado Pago. */
+/**
+ * Log de idempotência dos webhooks do Mercado Pago. `mpNotificationId` é o
+ * `id` de topo do corpo do webhook (o id do EVENTO, não do pagamento — um
+ * mesmo pagamento gera várias notificações ao longo da vida dele) com unique
+ * index parcial pra dedupe de reentrega (ver migration 0001).
+ */
 export const webhookEvents = pgTable('webhook_events', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   mpPaymentId: text('mp_payment_id').notNull(),
+  mpNotificationId: text('mp_notification_id'),
   eventType: text('event_type'),
   payload: jsonb('payload').notNull(),
   receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),

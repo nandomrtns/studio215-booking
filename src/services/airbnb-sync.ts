@@ -8,6 +8,31 @@ interface IcsRange {
   end: string;
 }
 
+/** Aceita tanto `db` quanto um `tx` de transaction — só precisa de `.select`. */
+type Queryable = Pick<typeof db, 'select'>;
+
+/**
+ * Checagem just-in-time contra o calendário sincronizado do Airbnb — não tem
+ * trava no banco (diferente de reservation-vs-reservation, que a EXCLUDE
+ * constraint cobre), por isso precisa ser checado explicitamente em todo
+ * lugar que decide confirmar uma data. Usado na criação de reserva
+ * (routes/reservations.ts) e no resgate de pagamento atrasado
+ * (services/payment-confirmation.ts).
+ */
+export async function checkAirbnbConflict(
+  executor: Queryable,
+  checkIn: string,
+  checkOut: string
+): Promise<boolean> {
+  const syncRow = await executor
+    .select({ rawRanges: airbnbSyncState.rawRanges })
+    .from(airbnbSyncState)
+    .where(eq(airbnbSyncState.id, 1))
+    .limit(1);
+  const ranges = (syncRow[0]?.rawRanges as IcsRange[] | undefined) ?? [];
+  return ranges.some((r) => r.start < checkOut && r.end > checkIn);
+}
+
 function parseIcsDate(value: string): string {
   // VALUE=DATE vem como YYYYMMDD
   return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`;

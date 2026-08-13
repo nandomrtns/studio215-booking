@@ -1,16 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { airbnbSyncState, reservations } from '../db/schema.js';
+import { reservations } from '../db/schema.js';
 import { createReservationSchema } from '../schemas/reservation.js';
 import { computeQuote, findApplicableRule, nightsBetween } from '../services/pricing.js';
+import { checkAirbnbConflict } from '../services/airbnb-sync.js';
 import { getCancellationPolicy } from '../config/cancellation-policy.js';
 import { ADVISORY_LOCK_KEY, PG_EXCLUSION_VIOLATION, RESERVATION_HOLD_MINUTES } from '../constants.js';
-
-interface AirbnbRawRange {
-  start: string;
-  end: string;
-}
 
 function reservationResponse(row: typeof reservations.$inferSelect) {
   return {
@@ -23,6 +19,8 @@ function reservationResponse(row: typeof reservations.$inferSelect) {
     cleaningFeeCents: row.cleaningFeeCents,
     totalCents: row.totalCents,
     currency: row.currency,
+    paymentMethod: row.paymentMethod,
+    mpPaymentStatus: row.mpPaymentStatus,
     cancellationPolicy: row.cancellationPolicySnapshot,
     expiresAt: row.expiresAt,
   };
@@ -67,15 +65,7 @@ export async function reservationRoutes(app: FastifyInstance) {
           // constraint no insert abaixo. O Airbnb não tem trava no banco, por
           // isso a checagem explícita aqui — precisa acontecer DENTRO do
           // lock pra valer algo.
-          const syncRow = await tx
-            .select({ rawRanges: airbnbSyncState.rawRanges })
-            .from(airbnbSyncState)
-            .where(eq(airbnbSyncState.id, 1))
-            .limit(1);
-          const airbnbRanges = (syncRow[0]?.rawRanges as AirbnbRawRange[] | undefined) ?? [];
-          const airbnbConflict = airbnbRanges.some(
-            (r) => r.start < input.checkOut && r.end > input.checkIn
-          );
+          const airbnbConflict = await checkAirbnbConflict(tx, input.checkIn, input.checkOut);
           if (airbnbConflict) {
             throw Object.assign(new Error('indisponivel'), {
               statusCode: 409,

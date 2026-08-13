@@ -42,7 +42,20 @@ export async function buildApp() {
   await app.register(pricingRoutes);
   await app.register(reservationRoutes);
 
-  // Pagamento, webhook, .ics de saída e admin chegam na Fase 3/4.
+  // Import dinâmico: lib/mercado-pago.ts lança na hora de importar se
+  // MP_ACCESS_TOKEN não estiver setado — isso mantém o boot da Fase 1/2
+  // funcionando em qualquer ambiente sem credenciais MP configuradas (ex.:
+  // dev local sem pagamento), em vez de derrubar o servidor inteiro.
+  if (config.MP_ACCESS_TOKEN) {
+    const { paymentRoutes } = await import('./routes/payments.js');
+    const { webhookRoutes } = await import('./routes/webhooks.js');
+    await app.register(paymentRoutes);
+    await app.register(webhookRoutes);
+  } else {
+    app.log.warn('MP_ACCESS_TOKEN não definido — rotas de pagamento desativadas.');
+  }
+
+  // .ics de saída e admin chegam na Fase 4.
 
   return app;
 }
