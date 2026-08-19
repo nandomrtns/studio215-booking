@@ -4,12 +4,13 @@ Backend de reserva direta do Studio 215 — Fastify + Drizzle + Postgres, deploy
 no Railway. Serviço separado do site (`studio215-site`, que continua estático no
 GitHub Pages sem nenhuma mudança).
 
-**Estado atual: Fase 3 em andamento.** Fases 1 e 2 completas e em produção
-(motor de reservas, calendário sincronizado com o Airbnb, expiração
-automática). Fase 3 (pagamento via Mercado Pago) testada e funcionando em
-sandbox (Pix, cartão aprovado/recusado, webhook) — falta preparar a conta do
-Nando pra receber de verdade e trocar pras credenciais de produção. Ver
-[Roadmap](#roadmap) abaixo pro estado exato e os próximos passos.
+**Estado atual: Fase 3 bloqueada no lado do Mercado Pago.** Fases 1 e 2
+completas e em produção (motor de reservas, calendário sincronizado com o
+Airbnb, expiração automática). Fase 3 (pagamento) testada e funcionando em
+sandbox, e já configurada com credenciais de produção — mas o MP recusa
+pagamentos reais com `PA_UNAUTHORIZED_RESULT_FROM_POLICIES`, uma trava de
+conta/aplicação que não depende do código. Ver [Roadmap](#roadmap) abaixo,
+item **D2**, pro diagnóstico completo e os caminhos de solução.
 
 ## Rodar localmente
 
@@ -118,13 +119,31 @@ reverter pra `node dist/server.js` imediatamente.
       (Checkout Transparente / API de Pagamentos), credenciais de teste e
       webhook configurados.
 - [x] **B — Testar em sandbox.** Feito em 2026-08-13 — ver acima.
-- [ ] **C — Conta pronta pra receber de verdade.** Fora do código: identidade
-      verificada e conta bancária vinculada na conta MP do Nando (Configurações
-      → Conta bancária/Saques no painel MP), pra o saque não ficar retido.
-- [ ] **D — Produção.** Gerar credenciais de produção no painel MP, registrar
-      o mesmo webhook em modo produção (assinatura secreta é diferente da de
-      teste), trocar as 3 env vars no Railway e o `MP_PUBLIC_KEY` em
-      `booking.js`, publicar o site.
+- [x] **C — Conta pronta pra receber de verdade.** Identidade verificada
+      (incluindo reconhecimento facial) e chaves Pix cadastradas na conta MP
+      do Nando.
+- [x] **D — Produção configurada.** Credenciais de produção geradas
+      (`APP_USR-...`), env vars trocadas no Railway e `MP_PUBLIC_KEY` de
+      produção publicada no site. A assinatura secreta do webhook é a **mesma**
+      em teste e produção nesta aplicação — não precisou mudar.
+- [ ] **D2 — 🚫 BLOQUEADO: Mercado Pago recusa pagamentos reais.** Com
+      credenciais de produção, `POST /v1/payments` retorna
+      `403 PA_UNAUTHORIZED_RESULT_FROM_POLICIES` ("At least one policy returned
+      UNAUTHORIZED"). **Não é bug do nosso código** — reproduzido chamando a API
+      do MP direto, fora do backend, e falha até com R$1,00 sem CPF. O token é
+      válido (leituras autenticadas funcionam) e o Pix está `active` na conta.
+      Duas causas candidatas, ambas resolvidas só no painel do MP pelo Nando:
+      1. **Avaliação "Qualidade da integração" não concluída** — a
+         [doc do MP](https://www.mercadopago.com.br/developers/pt/docs/checkout-api/integration-test/go-to-production-requirements)
+         lista "medir a qualidade da integração" como etapa obrigatória antes
+         de produção; o painel da aplicação mostra "ETAPA 2 DE 6" e um card
+         "Você não passou? Tente novamente".
+      2. **Conta é do tipo pessoal** — `GET /users/me` retorna
+         `"mercadopago_account_type": "personal"`. A doc não afirma
+         explicitamente que Checkout Transparente exige conta de vendedor/
+         empresa, então isso é hipótese forte, não fato confirmado.
+      Se nenhuma das duas destravar, abrir chamado no suporte do MP citando o
+      código de erro — bloqueios de PolicyAgent não são autoexplicativos.
 - [ ] **E — Primeiro pagamento real supervisionado.** Nando faz uma reserva de
       verdade via `?preview=1` (Pix de valor baixo ou cartão próprio) pra
       confirmar que o dinheiro cai na conta MP. Só depois disso remove o gate
