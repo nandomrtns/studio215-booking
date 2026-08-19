@@ -132,18 +132,26 @@ reverter pra `node dist/server.js` imediatamente.
       UNAUTHORIZED"). **Não é bug do nosso código** — reproduzido chamando a API
       do MP direto, fora do backend, e falha até com R$1,00 sem CPF. O token é
       válido (leituras autenticadas funcionam) e o Pix está `active` na conta.
-      Duas causas candidatas, ambas resolvidas só no painel do MP pelo Nando:
-      1. **Avaliação "Qualidade da integração" não concluída** — a
-         [doc do MP](https://www.mercadopago.com.br/developers/pt/docs/checkout-api/integration-test/go-to-production-requirements)
-         lista "medir a qualidade da integração" como etapa obrigatória antes
-         de produção; o painel da aplicação mostra "ETAPA 2 DE 6" e um card
-         "Você não passou? Tente novamente".
-      2. **Conta é do tipo pessoal** — `GET /users/me` retorna
-         `"mercadopago_account_type": "personal"`. A doc não afirma
-         explicitamente que Checkout Transparente exige conta de vendedor/
-         empresa, então isso é hipótese forte, não fato confirmado.
-      Se nenhuma das duas destravar, abrir chamado no suporte do MP citando o
-      código de erro — bloqueios de PolicyAgent não são autoexplicativos.
+      **O que já foi descartado** (testado em 2026-08-19):
+      - Não é o meio de pagamento: Pix **e** boleto falham igual → bloqueio
+        vale pra conta inteira, não é específico do Pix.
+      - Não é valor, CPF ou e-mail: falha com R$1,00, sem `identification`,
+        com e-mail comum.
+      - Não é credencial inválida: leituras autenticadas (`/users/me`,
+        `/payment_methods`) funcionam com o mesmo token, e o Pix aparece
+        `active` na conta.
+      - **Não é a avaliação "Qualidade da integração".** Ela está em 0/100 e
+        nunca rodou, mas exige "Payment Id de um pagamento das últimas 24h
+        com credenciais produtivas" — que é justamente o que o PolicyAgent
+        impede de criar. Como o MP não desenharia um ciclo impossível, a
+        avaliação vem **depois** de a conta poder cobrar, não antes.
+      **Causa provável restante:** a conta não está habilitada a processar
+      pagamentos via API em produção. `GET /users/me` retorna
+      `"mercadopago_account_type": "personal"`. Isso não é confirmado por
+      documentação como requisito do Checkout Transparente, então o caminho
+      é **abrir chamado no suporte do MP citando o código do erro** — bloqueios
+      de PolicyAgent são opacos de propósito e só o suporte enxerga qual
+      política disparou.
 - [ ] **E — Primeiro pagamento real supervisionado.** Nando faz uma reserva de
       verdade via `?preview=1` (Pix de valor baixo ou cartão próprio) pra
       confirmar que o dinheiro cai na conta MP. Só depois disso remove o gate
