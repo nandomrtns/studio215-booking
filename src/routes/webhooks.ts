@@ -18,9 +18,9 @@ interface MpNotificationBody {
  * O MP normaliza ids alfanuméricos pra minúsculas antes de assinar, mas o
  * validador do SDK monta o manifest com o id verbatim. Com a API antiga isso
  * nunca importou (ids de pagamento eram numéricos); ids de ordem são
- * alfanuméricos e maiúsculos (`ORD01M0...`), então a assinatura falharia em
- * toda notificação. Tenta as duas formas e loga qual valeu, pra podermos
- * fixar uma só depois de ver notificações reais.
+ * alfanuméricos e maiúsculos (`ORD01M0...`), então sem isto a assinatura
+ * falharia em TODA notificação — e o MP desabilita endpoints que só devolvem
+ * 401. Confirmado com notificações reais: sempre valida em minúsculas.
  */
 function validateSignature(
   app: FastifyInstance,
@@ -36,14 +36,18 @@ function validateSignature(
       secret,
     });
 
+  // Confirmado com notificações reais em 19/08/2026: o MP sempre assina sobre
+  // a versão minúscula. Tentamos ela primeiro; o original fica como reserva
+  // caso algum tópico futuro use id numérico (onde as duas formas coincidem
+  // de qualquer jeito) ou o MP mude o comportamento.
+  const lowered = dataId.toLowerCase();
   try {
-    attempt(dataId);
+    attempt(lowered);
   } catch (err) {
     if (!(err instanceof InvalidWebhookSignatureError)) throw err;
-    const lowered = dataId.toLowerCase();
     if (lowered === dataId) throw err;
-    attempt(lowered);
-    app.log.info('assinatura do webhook validou com data.id em minúsculas');
+    attempt(dataId);
+    app.log.warn('assinatura do webhook validou com data.id ORIGINAL — o MP mudou o comportamento');
   }
 }
 
