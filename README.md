@@ -152,6 +152,16 @@ reverter pra `node dist/server.js` imediatamente.
       é **abrir chamado no suporte do MP citando o código do erro** — bloqueios
       de PolicyAgent são opacos de propósito e só o suporte enxerga qual
       política disparou.
+- [x] **D3 — Preparação para a avaliação de qualidade.** Feito em 2026-08-19,
+      enquanto o bloqueio acima não é resolvido. A avaliação exige 73/100 e
+      estamos em 0 (nunca rodou). Implementado o que pontua e depende de nós:
+      `additional_info` com item da reserva e telefone do pagador,
+      `statement_descriptor` (`STUDIO215`) no cartão, e device id do
+      `security.js` do MP via header `X-Meli-Session-Id`. Já tínhamos
+      `external_reference`, `notification_url`, webhooks, SDK oficial e
+      tokenização client-side. Payloads validados direto na API do MP com
+      credenciais de teste. Falta só poder rodar a medição — que depende do
+      bloqueio D2 sair.
 - [ ] **E — Primeiro pagamento real supervisionado.** Nando faz uma reserva de
       verdade via `?preview=1` (Pix de valor baixo ou cartão próprio) pra
       confirmar que o dinheiro cai na conta MP. Só depois disso remove o gate
