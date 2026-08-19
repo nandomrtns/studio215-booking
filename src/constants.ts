@@ -20,3 +20,10 @@ export const ADVISORY_LOCK_KEY = 'studio215:reservation';
 
 /** Código de erro do Postgres pra "exclusion_violation" (a trava de overbooking). */
 export const PG_EXCLUSION_VIOLATION = '23P01';
+
+/**
+ * A Orders API responde 402 quando o emissor recusa o cartão — é recusa de
+ * pagamento, não erro de sistema. (A API antiga devolvia 201 com status
+ * 'rejected'.)
+ */
+export const PAYMENT_REJECTED_STATUS = 402;

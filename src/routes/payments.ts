@@ -4,6 +4,7 @@ import { MercadoPagoError } from 'mercadopago';
 import { db } from '../db/client.js';
 import { reservations } from '../db/schema.js';
 import { createPaymentSchema } from '../schemas/payment.js';
+import { PAYMENT_REJECTED_STATUS } from '../constants.js';
 import {
   createCardOrder,
   createPixOrder,
@@ -111,6 +112,29 @@ export async function paymentRoutes(app: FastifyInstance) {
         if ((err as { amountBlocked?: boolean }).amountBlocked) {
           req.log.error({ err }, 'pagamento barrado pela trava MP_MAX_AMOUNT_CENTS');
           return reply.status(503).send({ error: 'pagamento_indisponivel' });
+        }
+        // Cartão recusado NÃO é falha de sistema, mas a Orders API responde
+        // com erro HTTP 402 (a API antiga devolvia 201 com status
+        // 'rejected'). O corpo do 402 traz a ordem completa em `data`, mas o
+        // SDK descarta esse campo e preserva só o status — o que basta pra
+        // classificar. Sem isso o hóspede veria "erro no sistema" no lugar de
+        // "cartão recusado", e não tentaria outro cartão.
+        if (err instanceof MercadoPagoError && err.status === PAYMENT_REJECTED_STATUS) {
+          req.log.info({ reservationId: reservation.id }, 'pagamento recusado pelo emissor');
+          await db
+            .update(reservations)
+            .set({ mpPaymentStatus: 'failed', paymentMethod: input.method, updatedAt: new Date() })
+            .where(eq(reservations.id, reservation.id));
+          // 201 de propósito: a requisição foi processada com sucesso, quem
+          // recusou foi o emissor. O site distingue pelo campo `status`.
+          return reply.status(201).send({
+            mpOrderId: null,
+            mpPaymentId: null,
+            method: input.method,
+            status: 'rejected',
+            orderStatus: 'failed',
+            statusDetail: 'rejected_by_issuer',
+          });
         }
         if (err instanceof MercadoPagoError) {
           req.log.error({ err }, 'falha na API do Mercado Pago ao criar ordem');
