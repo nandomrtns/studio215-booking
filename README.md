@@ -160,8 +160,19 @@ reverter pra `node dist/server.js` imediatamente.
       `security.js` do MP via header `X-Meli-Session-Id`. Já tínhamos
       `external_reference`, `notification_url`, webhooks, SDK oficial e
       tokenização client-side. Payloads validados direto na API do MP com
-      credenciais de teste. Falta só poder rodar a medição — que depende do
-      bloqueio D2 sair.
+      credenciais de teste.
+
+      **Primeira medição rodou em 19/08/2026: 38/100** (mínimo é 73). Mas ela
+      usou o pagamento `173701737953`, que veio do **Checkout Pro** (link de
+      teste criado pra diagnosticar o bloqueio D2), não do nosso Checkout
+      Transparente — ou seja, mediu um fluxo que não é o nosso. Os itens que
+      ela aponta como pendentes já estão implementados aqui:
+      `external_reference` (14 pts), SDK MercadoPago.JS V2 / Card Payment
+      Brick (10), `statement_descriptor` (10), SSL (9), TLS 1.2+ (8, o site
+      negocia TLS 1.3), e tokenização PCI no cliente via Brick (8).
+      38 + 59 = 97, então uma medição contra um pagamento do nosso fluxo deve
+      passar com folga. **Não há código pendente pra isso** — falta só poder
+      criar um pagamento real pela nossa integração, que é o bloqueio D2.
 - [ ] **E — Primeiro pagamento real supervisionado.** Nando faz uma reserva de
       verdade via `?preview=1` (Pix de valor baixo ou cartão próprio) pra
       confirmar que o dinheiro cai na conta MP. Só depois disso remove o gate
