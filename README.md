@@ -4,13 +4,56 @@ Backend de reserva direta do Studio 215 — Fastify + Drizzle + Postgres, deploy
 no Railway. Serviço separado do site (`studio215-site`, que continua estático no
 GitHub Pages sem nenhuma mudança).
 
-**Estado atual: Fase 3 bloqueada no lado do Mercado Pago.** Fases 1 e 2
+**Estado atual: Fase 3 migrada para a Orders API e validada em sandbox.**
+O bloqueio `PA_UNAUTHORIZED_RESULT_FROM_POLICIES` era a rota: no Brasil,
+aplicações novas usam `POST /v1/orders`, não `POST /v1/payments`. Migração
+concluída em 19/08/2026 e testada ponta a ponta com contas de teste do MP —
+Pix, cartão aprovado, cartão recusado, webhook e cancelamento de ordem na
+expiração. Falta o primeiro pagamento real supervisionado (item E) e a
+limpeza dos artefatos de teste (ver seção "Limpeza pendente").
+
+<details>
+<summary>Estado anterior (histórico do bloqueio)</summary>
+
+**Fase 3 bloqueada no lado do Mercado Pago.** Fases 1 e 2
 completas e em produção (motor de reservas, calendário sincronizado com o
 Airbnb, expiração automática). Fase 3 (pagamento) testada e funcionando em
 sandbox, e já configurada com credenciais de produção — mas o MP recusa
 pagamentos reais com `PA_UNAUTHORIZED_RESULT_FROM_POLICIES`, uma trava de
 conta/aplicação que não depende do código. Ver [Roadmap](#roadmap) abaixo,
 item **D2**, pro diagnóstico completo e os caminhos de solução.
+
+</details>
+
+## Limpeza pendente (antes de abrir ao público)
+
+Artefatos deixados no ar durante os testes de 19/08/2026:
+
+1. **Regra de preço de teste** em `pricing_rules` (diária 25c + limpeza 25c,
+   janela 20/08–30/09/2026). Remover no Railway → Postgres → Database → Data,
+   no campo de query:
+   ```sql
+   delete from pricing_rules where nightly_rate_cents = 25 and cleaning_fee_cents = 25;
+   ```
+2. **`MP_MAX_AMOUNT_CENTS=200`** no serviço `studio215-booking` — trava que
+   recusa cobrança acima de R$2. Remover depois do pagamento supervisionado.
+3. **Reservas de teste** no banco (e-mails `@example.com` e `@testuser.com`).
+4. **Gate `PREVIEW_MODE`** em `site/assets/js/booking.js` — o último a sair.
+
+## Armadilhas conhecidas
+
+- **Variável no Railway:** limpar o campo antes de colar. Colar por cima deixa
+  o nome da variável dentro do valor e o erro que aparece é ilegível
+  (`Bearer MP_ACCESS_TOKEN APP_USR-...`).
+- **O worker é um serviço separado** (`invigorating-flexibility`) com
+  variáveis próprias. Precisa do `MP_ACCESS_TOKEN` para cancelar ordens.
+- **Cartão Mastercard de teste** é recusado em contas de teste com erro
+  enganoso (`invalid_transaction_amount`). Usar Visa `4235647728025682`.
+- **Sandbox exige e-mail do pagador terminando em `@testuser.com`.**
+- **Migration em produção:** trocar o Start Command para
+  `node dist/db/migrate.js && node dist/server.js`, confirmar nos logs, e
+  **reverter imediatamente** — o migrate não encerra o processo, então o
+  servidor nunca sobe enquanto esse comando estiver ativo.
 
 ## Rodar localmente
 
