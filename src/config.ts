@@ -12,6 +12,10 @@ const envSchema = z.object({
   // Usados a partir da Fase 2+ — opcionais por enquanto pra não travar o boot da Fase 1.
   AIRBNB_ICS_URL: z.string().optional(),
   MP_ACCESS_TOKEN: z.string().optional(),
+  // Trava temporária pros testes em produção: com ela definida, o backend
+  // recusa qualquer cobrança acima desse valor antes de chamar o MP.
+  // Remover depois do primeiro pagamento real supervisionado.
+  MP_MAX_AMOUNT_CENTS: z.coerce.number().int().positive().optional(),
   MP_PUBLIC_KEY: z.string().optional(),
   MP_WEBHOOK_SECRET: z.string().optional(),
   CALENDAR_FEED_TOKEN: z.string().optional(),

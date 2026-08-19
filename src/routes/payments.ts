@@ -1,27 +1,48 @@
 import type { FastifyInstance } from 'fastify';
 import { eq } from 'drizzle-orm';
 import { MercadoPagoError } from 'mercadopago';
-import type { PaymentResponse } from 'mercadopago/dist/clients/payment/commonTypes.js';
 import { db } from '../db/client.js';
 import { reservations } from '../db/schema.js';
 import { createPaymentSchema } from '../schemas/payment.js';
 import {
-  createCardPayment,
-  createPixPayment,
+  createCardOrder,
+  createPixOrder,
   derivePaymentMethod,
-  getPayment,
+  getOrder,
+  relevantPayment,
+  type OrderResponse,
 } from '../services/mercado-pago-payments.js';
-import { applyPaymentResult } from '../services/payment-confirmation.js';
+import { applyOrderResult } from '../services/payment-confirmation.js';
 
-function paymentResponse(payment: PaymentResponse) {
+/** Ordem ainda em voo — pagamento não chegou a um desfecho. */
+const OPEN_ORDER_STATUSES = ['created', 'processing', 'action_required'];
+
+/**
+ * Traduz o vocabulário da Orders API pro que o site já entende. O frontend
+ * foi escrito contra a API antiga e só distingue três desfechos; manter esse
+ * contrato evita mexer no site numa migração que já é grande.
+ */
+function toLegacyStatus(orderStatus?: string): 'approved' | 'rejected' | 'pending' {
+  if (orderStatus === 'processed') return 'approved';
+  if (['failed', 'canceled', 'expired', 'refunded', 'charged_back'].includes(orderStatus ?? '')) {
+    return 'rejected';
+  }
+  return 'pending';
+}
+
+function paymentResponse(order: OrderResponse) {
+  const payment = relevantPayment(order);
+  const method = payment?.payment_method;
   return {
-    mpPaymentId: payment.id != null ? String(payment.id) : null,
-    method: derivePaymentMethod(payment),
-    status: payment.status,
-    statusDetail: payment.status_detail,
-    qrCode: payment.point_of_interaction?.transaction_data?.qr_code,
-    qrCodeBase64: payment.point_of_interaction?.transaction_data?.qr_code_base64,
-    expiresAt: payment.date_of_expiration,
+    mpPaymentId: payment?.id ?? null,
+    mpOrderId: order.id ?? null,
+    method: derivePaymentMethod(order),
+    status: toLegacyStatus(order.status),
+    statusDetail: order.status_detail,
+    orderStatus: order.status,
+    qrCode: method?.qr_code,
+    qrCodeBase64: method?.qr_code_base64,
+    expiresAt: payment?.date_of_expiration,
   };
 }
 
@@ -56,38 +77,43 @@ export async function paymentRoutes(app: FastifyInstance) {
 
       try {
         if (input.method === 'pix') {
-          // Idempotência: Pix ainda pendente de pagamento → devolve o mesmo
-          // QR em vez de gerar um pagamento novo (cobre reload de página).
+          // Idempotência: Pix ainda em voo → devolve o mesmo QR em vez de
+          // gerar uma ordem nova (cobre reload de página). Mesmo se caísse
+          // no ramo de criar, a idempotencyKey faria o MP devolver a mesma
+          // ordem — essa checagem é otimização, não a garantia.
           const hasOpenPix =
             reservation.paymentMethod === 'pix' &&
-            reservation.mpPaymentId &&
-            (reservation.mpPaymentStatus === 'pending' || reservation.mpPaymentStatus === 'in_process');
+            reservation.mpOrderId &&
+            OPEN_ORDER_STATUSES.includes(reservation.mpPaymentStatus ?? '');
 
-          const payment = hasOpenPix
-            ? await getPayment(reservation.mpPaymentId as string)
-            : await createPixPayment(reservation, input.deviceId);
+          const order = hasOpenPix
+            ? await getOrder(reservation.mpOrderId as string)
+            : await createPixOrder(reservation, input.deviceId);
 
           // Sempre reaplica o resultado, mesmo no caminho de reload: se o
           // Pix aprovou entre a última checagem e agora, confirma na hora
           // em vez de esperar o webhook chegar.
-          await applyPaymentResult(payment);
-          return reply.status(201).send(paymentResponse(payment));
+          await applyOrderResult(order);
+          return reply.status(201).send(paymentResponse(order));
         }
 
-        const payment = await createCardPayment(reservation, {
+        const order = await createCardOrder(reservation, {
           token: input.token,
           installments: input.installments,
           paymentMethodId: input.paymentMethodId,
-          issuerId: input.issuerId,
           deviceId: input.deviceId,
         });
         // Fast-path síncrono: cartão aprova/rejeita na hora, não precisa
         // esperar o webhook pra confirmar a reserva.
-        await applyPaymentResult(payment);
-        return reply.status(201).send(paymentResponse(payment));
+        await applyOrderResult(order);
+        return reply.status(201).send(paymentResponse(order));
       } catch (err) {
+        if ((err as { amountBlocked?: boolean }).amountBlocked) {
+          req.log.error({ err }, 'pagamento barrado pela trava MP_MAX_AMOUNT_CENTS');
+          return reply.status(503).send({ error: 'pagamento_indisponivel' });
+        }
         if (err instanceof MercadoPagoError) {
-          req.log.error({ err }, 'falha na API do Mercado Pago ao criar pagamento');
+          req.log.error({ err }, 'falha na API do Mercado Pago ao criar ordem');
           return reply.status(502).send({ error: 'falha_mercado_pago' });
         }
         req.log.error(err, 'falha ao criar pagamento');

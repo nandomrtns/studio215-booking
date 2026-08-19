@@ -2,9 +2,13 @@ export const RESERVATION_HOLD_MINUTES = 30;
 
 /**
  * Folga extra além do expires_at normal antes do worker expirar uma reserva
- * de vez — rede de segurança pra webhook do Mercado Pago atrasado, não o
- * mecanismo principal (esse é o date_of_expiration do Pix, igual ao
- * expires_at da reserva).
+ * de vez — rede de segurança pra webhook do Mercado Pago atrasado.
+ *
+ * A Orders API não deixa definir o vencimento do Pix: o QR vem sempre com
+ * 24h e os campos de expiração (`date_of_expiration`, `expiration_time`,
+ * `config.default_payment_due_date`) são recusados ou ignorados — verificado
+ * na prática. Quem alinha o QR ao prazo da reserva é o cancelamento explícito
+ * da ordem, em services/reservation-expiry.ts.
  */
 export const PAYMENT_EXPIRY_GRACE_MINUTES = 10;
 

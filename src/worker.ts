@@ -5,8 +5,9 @@
  */
 import { sql } from 'drizzle-orm';
 import { db } from './db/client.js';
+import { config } from './config.js';
 import { syncAirbnbCalendar } from './services/airbnb-sync.js';
-import { sweepExpiredReservations } from './services/reservation-expiry.js';
+import { cancelOrphanOrders, sweepExpiredReservations } from './services/reservation-expiry.js';
 
 const AIRBNB_SYNC_INTERVAL_MS = 20 * 60 * 1000;
 const EXPIRY_SWEEP_INTERVAL_MS = 2 * 60 * 1000;
@@ -18,8 +19,17 @@ async function main() {
   await syncAirbnbCalendar();
   setInterval(syncAirbnbCalendar, AIRBNB_SYNC_INTERVAL_MS);
 
-  await sweepExpiredReservations();
-  setInterval(sweepExpiredReservations, EXPIRY_SWEEP_INTERVAL_MS);
+  // O cancelamento só faz sentido com credencial do MP configurada — sem
+  // ela, o serviço roda as Fases 1 e 2 normalmente e só não cancela ordens.
+  const sweep = config.MP_ACCESS_TOKEN
+    ? async () => {
+        await sweepExpiredReservations();
+        await cancelOrphanOrders();
+      }
+    : sweepExpiredReservations;
+
+  await sweep();
+  setInterval(sweep, EXPIRY_SWEEP_INTERVAL_MS);
 
   console.log(
     `[worker] cron ativo — sync Airbnb a cada ${AIRBNB_SYNC_INTERVAL_MS / 60_000}min, ` +

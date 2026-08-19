@@ -40,7 +40,12 @@ export const reservations = pgTable(
 
     paymentMethod: text('payment_method'),
     mpPreferenceId: text('mp_preference_id'),
+    // Orders API: a cobrança tem o id da ordem (ORD...) e o do pagamento
+    // dentro dela (PAY...). O webhook e o estorno usam o da ordem; o do
+    // pagamento é o que aparece no extrato e o que o suporte do MP pede.
+    mpOrderId: text('mp_order_id'),
     mpPaymentId: text('mp_payment_id'),
+    /** Status cru da ordem: processed | action_required | failed | ... */
     mpPaymentStatus: text('mp_payment_status'),
 
     cancellationPolicySnapshot: jsonb('cancellation_policy_snapshot').notNull(),
@@ -109,7 +114,9 @@ export const pricingRules = pgTable('pricing_rules', {
  */
 export const webhookEvents = pgTable('webhook_events', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  mpPaymentId: text('mp_payment_id').notNull(),
+  // A notificação da Orders API traz o id da ordem, não o do pagamento.
+  mpOrderId: text('mp_order_id'),
+  mpPaymentId: text('mp_payment_id'),
   mpNotificationId: text('mp_notification_id'),
   eventType: text('event_type'),
   payload: jsonb('payload').notNull(),
