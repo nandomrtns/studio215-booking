@@ -65,7 +65,7 @@ export async function paymentRoutes(app: FastifyInstance) {
 
           const payment = hasOpenPix
             ? await getPayment(reservation.mpPaymentId as string)
-            : await createPixPayment(reservation);
+            : await createPixPayment(reservation, input.deviceId);
 
           // Sempre reaplica o resultado, mesmo no caminho de reload: se o
           // Pix aprovou entre a última checagem e agora, confirma na hora
@@ -79,6 +79,7 @@ export async function paymentRoutes(app: FastifyInstance) {
           installments: input.installments,
           paymentMethodId: input.paymentMethodId,
           issuerId: input.issuerId,
+          deviceId: input.deviceId,
         });
         // Fast-path síncrono: cartão aprova/rejeita na hora, não precisa
         // esperar o webhook pra confirmar a reserva.

@@ -30,9 +30,65 @@ function payerFor(reservation: ReservationRow) {
   };
 }
 
+/**
+ * O telefone chega em formato livre ("+55 51 99999-9999"). O MP quer DDD e
+ * número separados, sem o código do país.
+ */
+function splitPhone(rawPhone: string): { area_code: string; number: string } | undefined {
+  let digits = rawPhone.replace(/\D/g, '');
+  if (digits.startsWith('55') && digits.length > 11) digits = digits.slice(2);
+  if (digits.length < 10) return undefined;
+  return { area_code: digits.slice(0, 2), number: digits.slice(2) };
+}
+
+/**
+ * Quanto mais dados do comprador e do produto o MP recebe, melhor a análise
+ * antifraude e maior a taxa de aprovação — é também um dos critérios da
+ * avaliação de qualidade da integração.
+ */
+function additionalInfoFor(reservation: ReservationRow) {
+  const { firstName, lastName } = splitGuestName(reservation.guestName);
+  const nights = nightsBetweenDates(reservation.checkIn, reservation.checkOut);
+  const phone = splitPhone(reservation.guestPhone);
+
+  return {
+    items: [
+      {
+        id: reservation.id,
+        title: 'Studio 215 — Skyline Moinhos, Porto Alegre',
+        description:
+          `Hospedagem de ${nights} noite${nights > 1 ? 's' : ''} ` +
+          `(${reservation.checkIn} a ${reservation.checkOut}), ` +
+          `${reservation.guestCount} hóspede${reservation.guestCount > 1 ? 's' : ''}`,
+        category_id: 'travels',
+        quantity: 1,
+        unit_price: centsToAmount(reservation.totalCents),
+      },
+    ],
+    payer: {
+      first_name: firstName,
+      last_name: lastName,
+      ...(phone ? { phone } : {}),
+    },
+  };
+}
+
+/** Datas ISO (YYYY-MM-DD), sem fuso — mesma conta do services/pricing.ts. */
+function nightsBetweenDates(checkIn: string, checkOut: string): number {
+  const inDate = new Date(`${checkIn}T00:00:00Z`);
+  const outDate = new Date(`${checkOut}T00:00:00Z`);
+  return Math.round((outDate.getTime() - inDate.getTime()) / 86_400_000);
+}
+
 const NOTIFICATION_URL = `${config.PUBLIC_BASE_URL}/api/webhooks/mercadopago`;
 
-export async function createPixPayment(reservation: ReservationRow): Promise<PaymentResponse> {
+/** Aparece na fatura do cartão do hóspede — reduz contestação por "não reconheço". */
+const STATEMENT_DESCRIPTOR = 'STUDIO215';
+
+export async function createPixPayment(
+  reservation: ReservationRow,
+  deviceId?: string
+): Promise<PaymentResponse> {
   const payment = new Payment(mpClient);
   return payment.create({
     body: {
@@ -43,10 +99,16 @@ export async function createPixPayment(reservation: ReservationRow): Promise<Pay
       notification_url: NOTIFICATION_URL,
       date_of_expiration: reservation.expiresAt?.toISOString(),
       payer: payerFor(reservation),
+      additional_info: additionalInfoFor(reservation),
     },
-    // Uma chave por reserva+método — reenvio da mesma requisição (retry de
-    // rede, duplo clique) não cria um segundo pagamento no MP.
-    requestOptions: { idempotencyKey: `${reservation.id}:pix` },
+    requestOptions: {
+      // Uma chave por reserva+método — reenvio da mesma requisição (retry de
+      // rede, duplo clique) não cria um segundo pagamento no MP.
+      idempotencyKey: `${reservation.id}:pix`,
+      // Vai como header X-Meli-Session-Id: identifica o dispositivo do
+      // comprador pro antifraude do MP.
+      ...(deviceId ? { meliSessionId: deviceId } : {}),
+    },
   });
 }
 
@@ -55,6 +117,7 @@ export interface CreateCardPaymentInput {
   installments: number;
   paymentMethodId: string;
   issuerId: string;
+  deviceId?: string;
 }
 
 export async function createCardPayment(
@@ -72,11 +135,16 @@ export async function createCardPayment(
       description: `Studio 215 — ${reservation.checkIn} a ${reservation.checkOut}`,
       external_reference: reservation.id,
       notification_url: NOTIFICATION_URL,
+      statement_descriptor: STATEMENT_DESCRIPTOR,
       payer: payerFor(reservation),
+      additional_info: additionalInfoFor(reservation),
     },
-    // Inclui o token na chave — se o Brick gerar um token novo numa nova
-    // tentativa, é uma cobrança genuinamente nova, não deve ser deduplicada.
-    requestOptions: { idempotencyKey: `${reservation.id}:card:${input.token}` },
+    requestOptions: {
+      // Inclui o token na chave — se o Brick gerar um token novo numa nova
+      // tentativa, é uma cobrança genuinamente nova, não deve ser deduplicada.
+      idempotencyKey: `${reservation.id}:card:${input.token}`,
+      ...(input.deviceId ? { meliSessionId: input.deviceId } : {}),
+    },
   });
 }
 
