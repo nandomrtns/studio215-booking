@@ -6,6 +6,7 @@ import { healthRoutes } from './routes/health.js';
 import { availabilityRoutes } from './routes/availability.js';
 import { pricingRoutes } from './routes/pricing.js';
 import { reservationRoutes } from './routes/reservations.js';
+import { calendarRoutes } from './routes/calendar.js';
 
 export async function buildApp() {
   const app = Fastify({
@@ -55,7 +56,11 @@ export async function buildApp() {
     app.log.warn('MP_ACCESS_TOKEN não definido — rotas de pagamento desativadas.');
   }
 
-  // .ics de saída e admin chegam na Fase 4.
+  // Feed .ics de saída (Airbnb importa daqui). A própria rota se cala quando
+  // CALENDAR_FEED_TOKEN não está definido — sem token não existe feed.
+  await app.register(calendarRoutes);
+
+  // O painel admin chega na Fase 4.
 
   return app;
 }

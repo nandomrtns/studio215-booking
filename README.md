@@ -4,7 +4,15 @@ Backend de reserva direta do Studio 215 — Fastify + Drizzle + Postgres, deploy
 no Railway. Serviço separado do site (`studio215-site`, que continua estático no
 GitHub Pages sem nenhuma mudança).
 
-**Estado atual: Fase 3 migrada para a Orders API e validada em sandbox.**
+**Estado atual: Fase 3 validada em sandbox, sync do calendário nos dois
+sentidos.** O calendário do Airbnb passou a ser lido a cada **5 minutos** (era
+20), e a criação de reserva busca o `.ics` do Airbnb **na hora**, em vez de
+confiar no último snapshot — a janela de dupla reserva no sentido Airbnb → site
+deixou de existir na prática. O sentido site → Airbnb saiu do papel: o feed
+`GET /api/ics/studio215.ics?token=...` publica reservas e bloqueios manuais pro
+Airbnb importar (ver "Feed .ics de saída" abaixo).
+
+**Fase 3 migrada para a Orders API e validada em sandbox.**
 O bloqueio `PA_UNAUTHORIZED_RESULT_FROM_POLICIES` era a rota: no Brasil,
 aplicações novas usam `POST /v1/orders`, não `POST /v1/payments`. Migração
 concluída em 19/08/2026 e testada ponta a ponta com contas de teste do MP —
@@ -39,6 +47,40 @@ Artefatos deixados no ar durante os testes de 19/08/2026:
    recusa cobrança acima de R$2. Remover depois do pagamento supervisionado.
 3. **Reservas de teste** no banco (e-mails `@example.com` e `@testuser.com`).
 4. **Gate `PREVIEW_MODE`** em `site/assets/js/booking.js` — o último a sair.
+
+## Feed .ics de saída (site → Airbnb)
+
+`GET /api/ics/studio215.ics?token=<CALENDAR_FEED_TOKEN>` devolve um iCalendar
+com as reservas `pending`/`confirmed` e os bloqueios manuais — janela de 7 dias
+pra trás até 540 pra frente. Sem token válido responde **404**, não 401: pra
+quem não tem o token, o feed não existe.
+
+O que ele **não** exporta, de propósito:
+
+- As faixas que vieram do próprio Airbnb (`airbnb_sync_state`) — devolver pro
+  Airbnb o calendário que ele nos deu criaria eco.
+- Nome, e-mail ou telefone do hóspede. O evento diz só `Reservado (site)` ou
+  `Bloqueado`; o Airbnb guarda esse calendário e não precisa saber mais.
+
+O `UID` de cada evento é derivado do id da linha no banco, então é estável
+entre buscas — importador que vê UID novo a cada fetch duplica evento.
+
+**Pra ligar (uma vez):**
+
+1. Gerar o token: `openssl rand -hex 24`
+2. Railway → serviço `studio215-booking` → Variables → `CALENDAR_FEED_TOKEN`
+   (limpar o campo antes de colar — ver Armadilhas). O worker não precisa dessa
+   variável, só a API.
+3. Testar: `curl -sI "https://studio215-booking-production.up.railway.app/api/ics/studio215.ics?token=<token>"`
+   → `200` e `content-type: text/calendar`.
+4. Airbnb → anúncio → Calendário → Disponibilidade → **Sincronizar
+   calendários → Importar calendário**, colar a URL com o token.
+
+**Importante sobre a velocidade desse sentido:** quem decide de quanto em
+quanto tempo relê o feed é o Airbnb, e ele não expõe nem garante esse
+intervalo (na prática, horas). Não dá pra forçar. É por isso que a trava real
+contra dupla reserva continua sendo a EXCLUDE constraint no Postgres + a
+checagem just-in-time na criação da reserva — o feed é o aviso, não a trava.
 
 ## Armadilhas conhecidas
 
@@ -221,12 +263,31 @@ reverter pra `node dist/server.js` imediatamente.
       confirmar que o dinheiro cai na conta MP. Só depois disso remove o gate
       `PREVIEW_MODE` e abre pro público geral.
 
-### Fase 4 — Painel admin e .ics de saída — ainda não iniciada
+### Fase 4 — Painel admin e .ics de saída 🚧 parcial
 
-Login único (senha, sem tabela de usuários — `ADMIN_PASSWORD_HASH`/
-`ADMIN_JWT_SECRET` já reservados em `.env.example`), visão das reservas e
-bloqueios manuais pelo Nando, e feed `.ics` (`CALENDAR_FEED_TOKEN`) pro Airbnb
-importar o calendário do booking-service, fechando o sync nos dois sentidos.
+- [x] **Feed `.ics` de saída** (`CALENDAR_FEED_TOKEN`) pro Airbnb importar o
+      calendário do booking-service, fechando o sync nos dois sentidos. Rota em
+      `routes/calendar.ts`, testada localmente contra Postgres de verdade:
+      reserva cancelada e faixa vinda do Airbnb ficam de fora, `pending` e
+      `confirmed` entram, UID estável. Falta só ligar a variável no Railway e
+      importar a URL no painel do Airbnb — ver seção acima.
+- [ ] **Painel admin.** Login único (senha, sem tabela de usuários —
+      `ADMIN_PASSWORD_HASH`/`ADMIN_JWT_SECRET` já reservados em
+      `.env.example`), visão das reservas e criação de bloqueios manuais pelo
+      Nando. Hoje isso só dá pra fazer por SQL no Railway.
+
+### Sync do calendário — como está hoje
+
+| sentido | mecanismo | frequência |
+|---|---|---|
+| Airbnb → site | worker lê `AIRBNB_ICS_URL` | a cada 5 min |
+| Airbnb → site, na hora de reservar | `POST /api/reservations` busca o `.ics` antes de gravar (timeout 6s, cai no snapshot se falhar) | a cada tentativa de reserva |
+| site → Airbnb | Airbnb importa `GET /api/ics/studio215.ics` | quando o Airbnb quiser (horas) |
+
+5 minutos é o piso útil no primeiro sentido: o próprio Airbnb demora alguns
+minutos pra refletir uma reserva no `.ics` dele, então puxar mais rápido gasta
+requisição sem ganhar frescor. Tempo real de verdade não existe aqui — o
+Airbnb não oferece webhook, só arquivo pra baixar.
 
 ## Estrutura
 
