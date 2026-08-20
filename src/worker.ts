@@ -9,7 +9,11 @@ import { config } from './config.js';
 import { syncAirbnbCalendar } from './services/airbnb-sync.js';
 import { cancelOrphanOrders, sweepExpiredReservations } from './services/reservation-expiry.js';
 
-const AIRBNB_SYNC_INTERVAL_MS = 20 * 60 * 1000;
+// 5 min é o piso útil: o próprio Airbnb leva alguns minutos pra refletir uma
+// reserva nova no .ics dele, então puxar mais rápido que isso gasta requisição
+// sem ganhar frescor. A janela que sobra é fechada pelo fetch just-in-time na
+// criação da reserva (routes/reservations.ts).
+const AIRBNB_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 const EXPIRY_SWEEP_INTERVAL_MS = 2 * 60 * 1000;
 
 async function main() {

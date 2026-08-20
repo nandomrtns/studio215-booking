@@ -3,7 +3,7 @@ import { db } from '../db/client.js';
 import { airbnbSyncState } from '../db/schema.js';
 import { config } from '../config.js';
 
-interface IcsRange {
+export interface IcsRange {
   start: string;
   end: string;
 }
@@ -12,24 +12,34 @@ interface IcsRange {
 type Queryable = Pick<typeof db, 'select'>;
 
 /**
- * Checagem just-in-time contra o calendário sincronizado do Airbnb — não tem
- * trava no banco (diferente de reservation-vs-reservation, que a EXCLUDE
- * constraint cobre), por isso precisa ser checado explicitamente em todo
- * lugar que decide confirmar uma data. Usado na criação de reserva
- * (routes/reservations.ts) e no resgate de pagamento atrasado
- * (services/payment-confirmation.ts).
+ * Checagem just-in-time contra o calendário do Airbnb — não tem trava no banco
+ * (diferente de reservation-vs-reservation, que a EXCLUDE constraint cobre),
+ * por isso precisa ser checado explicitamente em todo lugar que decide
+ * confirmar uma data. Usado na criação de reserva (routes/reservations.ts) e
+ * no resgate de pagamento atrasado (services/payment-confirmation.ts).
+ *
+ * `freshRanges` permite passar um calendário recém-baixado do Airbnb em vez de
+ * ler o snapshot do banco — é o que a criação de reserva faz, pra fechar a
+ * janela entre o último sync do worker e o clique do hóspede. Passando null
+ * (ou nada), cai no snapshot, que é o comportamento seguro por padrão.
  */
 export async function checkAirbnbConflict(
   executor: Queryable,
   checkIn: string,
-  checkOut: string
+  checkOut: string,
+  freshRanges?: IcsRange[] | null
 ): Promise<boolean> {
-  const syncRow = await executor
-    .select({ rawRanges: airbnbSyncState.rawRanges })
-    .from(airbnbSyncState)
-    .where(eq(airbnbSyncState.id, 1))
-    .limit(1);
-  const ranges = (syncRow[0]?.rawRanges as IcsRange[] | undefined) ?? [];
+  let ranges = freshRanges;
+
+  if (!ranges) {
+    const syncRow = await executor
+      .select({ rawRanges: airbnbSyncState.rawRanges })
+      .from(airbnbSyncState)
+      .where(eq(airbnbSyncState.id, 1))
+      .limit(1);
+    ranges = (syncRow[0]?.rawRanges as IcsRange[] | undefined) ?? [];
+  }
+
   return ranges.some((r) => r.start < checkOut && r.end > checkIn);
 }
 
@@ -56,21 +66,25 @@ export function extractIcsRanges(icsText: string): IcsRange[] {
 }
 
 /**
- * Atualiza airbnb_sync_state com o calendário mais recente do Airbnb. Em caso
- * de erro, NUNCA zera raw_ranges — mantém o último dado bom e só marca o
- * erro, pra uma falha transitória do Airbnb não fazer o calendário inteiro
- * parecer livre.
+ * Atualiza airbnb_sync_state com o calendário mais recente do Airbnb e devolve
+ * as faixas baixadas — `null` quando a busca falhou, pra quem chamou saber que
+ * está sem dado fresco e decidir o que fazer. Em caso de erro, NUNCA zera
+ * raw_ranges — mantém o último dado bom e só marca o erro, pra uma falha
+ * transitória do Airbnb não fazer o calendário inteiro parecer livre.
+ *
+ * `timeoutMs` é menor no caminho do hóspede (criação de reserva, que espera a
+ * resposta) do que no worker, onde ninguém está esperando.
  */
-export async function syncAirbnbCalendar(): Promise<void> {
+export async function syncAirbnbCalendar(timeoutMs = 20_000): Promise<IcsRange[] | null> {
   if (!config.AIRBNB_ICS_URL) {
     console.warn('[airbnb-sync] AIRBNB_ICS_URL não definido — pulando.');
-    return;
+    return null;
   }
 
   try {
     const res = await fetch(config.AIRBNB_ICS_URL, {
       headers: { 'User-Agent': 'Mozilla/5.0' },
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
 
     if (!res.ok) {
@@ -91,6 +105,7 @@ export async function syncAirbnbCalendar(): Promise<void> {
       .where(eq(airbnbSyncState.id, 1));
 
     console.log(`[airbnb-sync] ${ranges.length} períodos ocupados sincronizados.`);
+    return ranges;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[airbnb-sync] falha ao sincronizar:', message);
@@ -99,5 +114,7 @@ export async function syncAirbnbCalendar(): Promise<void> {
       .update(airbnbSyncState)
       .set({ fetchStatus: 'error', lastError: message })
       .where(eq(airbnbSyncState.id, 1));
+
+    return null;
   }
 }

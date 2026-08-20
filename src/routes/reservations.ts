@@ -4,9 +4,16 @@ import { db } from '../db/client.js';
 import { reservations } from '../db/schema.js';
 import { createReservationSchema } from '../schemas/reservation.js';
 import { computeQuote, findApplicableRule, nightsBetween } from '../services/pricing.js';
-import { checkAirbnbConflict } from '../services/airbnb-sync.js';
+import { checkAirbnbConflict, syncAirbnbCalendar } from '../services/airbnb-sync.js';
 import { getCancellationPolicy } from '../config/cancellation-policy.js';
 import { ADVISORY_LOCK_KEY, PG_EXCLUSION_VIOLATION, RESERVATION_HOLD_MINUTES } from '../constants.js';
+
+/**
+ * Timeout curto: aqui tem um hóspede esperando a resposta. Se o Airbnb não
+ * responder nesse prazo, a checagem cai no snapshot do worker (<= 5 min) em
+ * vez de fazer o hóspede esperar.
+ */
+const AIRBNB_FETCH_TIMEOUT_MS = 6_000;
 
 function reservationResponse(row: typeof reservations.$inferSelect) {
   return {
@@ -43,6 +50,13 @@ export async function reservationRoutes(app: FastifyInstance) {
       const input = parsed.data;
       const nights = nightsBetween(input.checkIn, input.checkOut);
 
+      // Calendário do Airbnb buscado na hora, e não o snapshot do worker (até
+      // 5 min velho): esse intervalo é exatamente onde uma reserva feita no
+      // Airbnb viraria dupla reserva aqui. Fora da transaction de propósito —
+      // não segurar o lock consultivo durante I/O de rede. Devolve null se
+      // falhar, e aí a checagem abaixo usa o snapshot.
+      const freshAirbnbRanges = await syncAirbnbCalendar(AIRBNB_FETCH_TIMEOUT_MS);
+
       try {
         const row = await db.transaction(async (tx) => {
           // Serializa qualquer criação de reserva concorrente — uma
@@ -65,7 +79,12 @@ export async function reservationRoutes(app: FastifyInstance) {
           // constraint no insert abaixo. O Airbnb não tem trava no banco, por
           // isso a checagem explícita aqui — precisa acontecer DENTRO do
           // lock pra valer algo.
-          const airbnbConflict = await checkAirbnbConflict(tx, input.checkIn, input.checkOut);
+          const airbnbConflict = await checkAirbnbConflict(
+            tx,
+            input.checkIn,
+            input.checkOut,
+            freshAirbnbRanges
+          );
           if (airbnbConflict) {
             throw Object.assign(new Error('indisponivel'), {
               statusCode: 409,
